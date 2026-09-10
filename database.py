@@ -6,17 +6,14 @@ from typing import Optional
 
 # Автоматическое определение путей с поддержкой компиляции через PyInstaller
 if getattr(sys, 'frozen', False):
-    # Если запущено как скомпилированный бинарник
     BASE_DIR = Path(sys.executable).resolve().parent
 else:
-    # Если запущен обычный .py файл
     BASE_DIR = Path(__file__).resolve().parent
 
 DB_PATH = BASE_DIR / "bridge.db"
 
 
 def init_db() -> None:
-    """Инициализация базы данных и создание таблиц."""
     logging.info(f"[DB] Инициализация базы данных. Путь к файлу: {DB_PATH}")
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -35,9 +32,8 @@ def init_db() -> None:
 
 
 def add_user(zulip_id: str, tg_id: str) -> None:
-    """Добавляет новую связку или обновляет существующую (INSERT OR REPLACE)."""
     z_id = str(zulip_id)
-    t_id = str(tg_id)  # Для Макса здесь будет храниться Matrix ID (например, @user:max.ru)
+    t_id = str(tg_id)  # для Макса здесь будет храниться Matrix ID (например, @user:max.ru)
     logging.info(f"[DB] Попытка записи привязки: Zulip ID '{z_id}' <-> Max ID '{t_id}'")
 
     try:
@@ -56,7 +52,6 @@ def add_user(zulip_id: str, tg_id: str) -> None:
 
 
 def get_tg_id_by_zulip(zulip_id: str) -> Optional[str]:
-    """Ищет Max ID по Zulip ID. Используется мостом для отправки пушей."""
     z_id = str(zulip_id)
     logging.debug(f"[DB] Запрос Max ID для Zulip ID '{z_id}'...")
 
@@ -67,7 +62,6 @@ def get_tg_id_by_zulip(zulip_id: str) -> Optional[str]:
             row = cursor.fetchone()
 
             if row:
-                # Извлекаем строку из кортежа результата
                 max_id = row[0]
                 logging.debug(f"[DB] Найдено совпадение: Zulip ID '{z_id}' -> Max ID '{max_id}'")
                 return max_id
@@ -80,7 +74,6 @@ def get_tg_id_by_zulip(zulip_id: str) -> Optional[str]:
 
 
 def get_zulip_id_by_tg(tg_id: str) -> Optional[str]:
-    """Ищет Zulip ID по Max ID. Используется ботом для проверки статуса."""
     t_id = str(tg_id)
     logging.debug(f"[DB] Запрос Zulip ID для Max ID '{t_id}'...")
 
@@ -103,7 +96,6 @@ def get_zulip_id_by_tg(tg_id: str) -> Optional[str]:
 
 
 def remove_user_by_tg(tg_id: str) -> bool:
-    """Удаляет все привязки для конкретного Max ID. Возвращает True, если что-то удалено."""
     t_id = str(tg_id)
     logging.info(f"[DB] Попытка удаления привязок для Max ID '{t_id}'...")
 
