@@ -8,8 +8,7 @@ from pathlib import Path
 import aiohttp
 
 import database
-from bot import start_max_bot, ZULIPRC_PATH
-from bridge import ZulipMaxBridge
+from bot import start_max_bot
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -24,6 +23,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
+from bridge import ZulipMaxBridge
+
 
 def load_config():
     logging.info(f"[Main] Чтение конфигурационного файла: {ZULIPRC_PATH}")
@@ -35,12 +36,12 @@ def load_config():
     try:
         return {
             "stream": config.get('ntfy', 'stream'),
-            "max_token": config.get('telegram', 'bot_token'),
-            "max_user_id": config.get('max', 'bot_username', fallback="@bridge_bot:max.ru"),
-            "max_password": config.get('max', 'bot_password', fallback="your_password")
+            "max_token": config.get('max', 'api_token'),  # Читаем из секции [max]
+            "max_user_id": config.get('max', 'bot_username'),
+            "max_password": config.get('max', 'bot_password')
         }
     except Exception as e:
-        raise KeyError(f"Ошибка чтения секций в zuliprc: {e}")
+        raise KeyError(f"Ошибка чтения секций [ntfy] или [max] в zuliprc: {e}")
 
 
 async def main():

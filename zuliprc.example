@@ -1,0 +1,14 @@
+[api]
+email = bot-name@your-domain.ru
+key = abc123xyz456secretkeyzulip
+site = https://your-domain.ru
+
+[ntfy]
+stream = Разработка
+
+[max]
+api_token = XXXXXXX_YOUR_MAX_API_TOKEN_XXXXXXX
+
+# Доступы для Matrix-клиента бота (для обработки команд пользователей)
+bot_username = @bridge_bot:max.ru
+bot_password = YourSuperSecretPassword123

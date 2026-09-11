@@ -1,7 +1,8 @@
 import logging
 import sys
+import asyncio
 from pathlib import Path
-from nio import AsyncClient, MatrixRoom, RoomMessageText
+from nio import AsyncClient, MatrixRoom, RoomMessageText, InviteEvent  # Изменен импорт для инвайтов
 
 import database
 
@@ -68,8 +69,10 @@ async def message_callback(room: MatrixRoom, event: RoomMessageText) -> None:
             )
         except Exception as e:
             logging.error(f"[Max Bot] Ошибка записи в БД для {max_user_id}: {e}")
-            await matrix_client.room_send(room_id=room.room_id,
-                                          content={"msgtype": "m.text", "body": "❌ Ошибка при записи в базу данных."})
+            await matrix_client.room_send(
+                room_id=room.room_id,
+                content={"msgtype": "m.text", "body": "❌ Ошибка при записи в базу данных."}
+            )
 
     # Команда: Отвязать
     elif text.lower() == "отвязать":
@@ -82,18 +85,22 @@ async def message_callback(room: MatrixRoom, event: RoomMessageText) -> None:
         await matrix_client.room_send(room_id=room.room_id, content={"msgtype": "m.text", "body": res})
 
 
+# Кастомный асинхронный обработчик для приглашений в комнаты
+async def invite_callback(room: MatrixRoom, event: InviteEvent) -> None:
+    logging.info(f"[Max Bot] Получено приглашение в комнату {room.room_id} от {event.sender}. Принимаем...")
+    # Так как метод асинхронный, запускаем его как фоновую таску внутри Event Loop
+    asyncio.create_task(matrix_client.join(room.room_id))
+
+
 async def start_max_bot(user_id: str, password: str):
     global matrix_client
+
     logging.info(f"[Max Bot] Инициализация Matrix-клиента для сервера https://max.ru ...")
 
     matrix_client = AsyncClient("https://max.ru", user_id)
     matrix_client.add_event_callback(message_callback, RoomMessageText)
 
-    # автоматически принимать инвайты в новые диалоги от пользователей
-    matrix_client.add_event_callback(
-        lambda room, event: matrix_client.join(room.room_id),
-        "m.room.member"
-    )
+    matrix_client.add_by_type_callback(invite_callback, InviteEvent)
 
     logging.info("[Max Bot] Авторизация на сервере Макс...")
     await matrix_client.login(password)
