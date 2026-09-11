@@ -8,7 +8,8 @@ from pathlib import Path
 import aiohttp
 
 import database
-from bot import start_max_bot
+from bot import start_max_bot, matrix_client
+
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -32,11 +33,13 @@ def load_config():
         raise FileNotFoundError(f"Критическая ошибка: Файл {ZULIPRC_PATH} не найден!")
 
     config = configparser.ConfigParser()
-    config.read(ZULIPRC_PATH)
+    with open(ZULIPRC_PATH, "r", encoding="utf-8") as f:
+        config.read_file(f)
+
     try:
         return {
             "stream": config.get('ntfy', 'stream'),
-            "max_token": config.get('max', 'api_token'),  # Читаем из секции [max]
+            "max_token": config.get('max', 'api_token'),
             "max_user_id": config.get('max', 'bot_username'),
             "max_password": config.get('max', 'bot_password')
         }
@@ -63,13 +66,25 @@ async def main():
         zuliprc_path=ZULIPRC_PATH
     )
 
-    async with aiohttp.ClientSession() as session:
-        logging.info("[Main] Запуск параллельных процессов: Клиент Макс (Matrix) и Мост Zulip...")
+    try:
+        async with aiohttp.ClientSession() as session:
+            bridge.session = session # Явно прокидываем сессию в мост (на всякий случай)
+            logging.info("[Main] Запуск параллельных процессов: Клиент Макс (Matrix) и Мост Zulip...")
 
-        await asyncio.gather(
-            start_max_bot(config["max_user_id"], config["max_password"]),
-            bridge.start(session)
-        )
+            await asyncio.gather(
+                start_max_bot(config["max_user_id"], config["max_password"]),
+                bridge.start(session)
+            )
+    except asyncio.CancelledError:
+        logging.info("[Main] Получен сигнал отмены. Завершение работы процессов...")
+    except Exception as e:
+        logging.error(f"[Main] Ошибка во время работы параллельных задач: {e}")
+    finally:
+        # Корректно закрываю сессию Matrix-клиента, если она была инициализирована
+        if matrix_client and matrix_client.should_upload_keys: # проверка, что клиент запущен
+            logging.info("[Main] Закрытие сессии Matrix-клиента...")
+            await matrix_client.close()
+        logging.info("[Main] Единый сервис успешно остановлен.")
 
 
 if __name__ == "__main__":
