@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import html  # Добавлен для очистки сырых HTML-тегов из Zulip
 import zulip
 from pathlib import Path
 
@@ -20,15 +21,18 @@ class ZulipMaxBridge:
     async def send_max_push(self, max_chat_id: str, topic: str, sender_name: str, message_content: str) -> None:
         logging.info(f"[Bridge API] Попытка отправки пуша в Макс для пользователя: {max_chat_id}")
 
-        # для Макса Markdown разметка
+        safe_content = html.escape(message_content)
+
         text = (
             f"🔔 **Новое сообщение в Zulip [{self.stream_name}]**\n"
             f"**Тема:** {topic}\n"
             f"**От:** {sender_name}\n\n"
-            f"{message_content}"
+            f"{safe_content}"
         )
 
+        # Убедиться, что это конечная точка API (/api/v1/messages или похожая)
         url = "https://max.ru"
+
         headers = {
             "Authorization": f"Bearer {self.max_token}",
             "Content-Type": "application/json"
@@ -83,7 +87,9 @@ class ZulipMaxBridge:
             max_id = database.get_tg_id_by_zulip(str(user_id))
             if max_id:
                 self.loop.call_soon_threadsafe(
-                    lambda m=max_id: asyncio.create_task(self.send_max_push(m, topic, sender_name, content))
+                    lambda m=max_id, t=topic, s=sender_name, c=content: asyncio.create_task(
+                        self.send_max_push(m, t, s, c)
+                    )
                 )
 
     def start_zulip_listener(self):
