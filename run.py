@@ -41,3 +41,40 @@ def load_config():
         }
     except Exception as e:
         raise KeyError(f"Ошибка чтения секций в zuliprc: {e}")
+
+
+async def main():
+    loop = asyncio.get_running_loop()
+
+    logging.info("[Main] Инициализация базы данных SQLite...")
+    database.init_db()
+
+    try:
+        config = load_config()
+    except Exception as e:
+        logging.critical(f"[Main] Не удалось запустить приложение: {e}")
+        return
+
+    bridge = ZulipMaxBridge(
+        stream_name=config["stream"],
+        max_token=config["max_token"],
+        loop=loop,
+        zuliprc_path=ZULIPRC_PATH
+    )
+
+    async with aiohttp.ClientSession() as session:
+        logging.info("[Main] Запуск параллельных процессов: Клиент Макс (Matrix) и Мост Zulip...")
+
+        await asyncio.gather(
+            start_max_bot(config["max_user_id"], config["max_password"]),
+            bridge.start(session)
+        )
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("[Main] Сервис остановлен пользователем.")
+    except Exception as e:
+        logging.exception(f"[Main] Непредвиденное критическое исключение: {e}")
