@@ -35,7 +35,7 @@ def load_config():
     try:
         return {
             "stream": config.get('ntfy', 'stream'),
-            "max_token": config.get('telegram', 'bot_token'),  # Используем текущую секцию токена
+            "max_token": config.get('telegram', 'bot_token'),
             "max_user_id": config.get('max', 'bot_username', fallback="@bridge_bot:max.ru"),
             "max_password": config.get('max', 'bot_password', fallback="your_password")
         }
