@@ -3,13 +3,18 @@ import asyncio
 import os
 import configparser
 import logging
+import signal
 import sys
-from pathlib import Path
 import aiohttp
+import urllib3
+from pathlib import Path
+from dotenv import load_dotenv
 
-import database
-from bot import start_max_bot, matrix_client
+from bridge import ZulipMaksBridge
+from bot import MaksBotPoll
 
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -17,14 +22,15 @@ else:
     BASE_DIR = Path(__file__).resolve().parent
 
 ZULIPRC_PATH = BASE_DIR / "zuliprc"
+DOTENV_PATH = BASE_DIR / ".env"
+
+load_dotenv(dotenv_path=DOTENV_PATH)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
-
-from bridge import ZulipMaxBridge
 
 
 def load_config():
@@ -33,24 +39,43 @@ def load_config():
         raise FileNotFoundError(f"Критическая ошибка: Файл {ZULIPRC_PATH} не найден!")
 
     config = configparser.ConfigParser()
-    with open(ZULIPRC_PATH, "r", encoding="utf-8") as f:
-        config.read_file(f)
-
+    config.read(ZULIPRC_PATH)
     try:
+        zulip_site = config.get('api', 'site').rstrip('/')
+
+        maks_token = os.getenv("MAKS_BOT_TOKEN")
+        maks_api_url = os.getenv("MAKS_API_URL", "https://company.com").rstrip('/')
+
+        if not maks_token:
+            raise ValueError("Переменная MAKS_BOT_TOKEN не найдена в файле .env!")
+
+        logging.info("[Main] Конфигурация успешно загружена.")
         return {
-            "stream": config.get('ntfy', 'stream'),
-            "max_token": config.get('max', 'api_token'),
-            "max_user_id": config.get('max', 'bot_username'),
-            "max_password": config.get('max', 'bot_password')
+            "maks_token": maks_token,
+            "maks_api_url": maks_api_url,
+            "zulip_site": zulip_site
         }
     except Exception as e:
-        raise KeyError(f"Ошибка чтения секций [ntfy] или [max] в zuliprc: {e}")
+        raise KeyError(f"Ошибка чтения конфигурационных параметров: {e}")
 
 
 async def main():
-    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
 
-    logging.info("[Main] Инициализация базы данных SQLite...")
+    def handle_exit_signal():
+        print("\n[Система] Сервис остановлен пользователем через Ctrl+C.")
+        stop_event.set()
+        os._exit(0)
+
+    loop = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGINT, handle_exit_signal)
+        loop.add_signal_handler(signal.SIGTERM, handle_exit_signal)
+    except NotImplementedError:
+        pass
+
+    import database
+    logging.info("[Main] Инициализация базы данных...")
     database.init_db()
 
     try:
@@ -59,38 +84,34 @@ async def main():
         logging.critical(f"[Main] Не удалось запустить приложение: {e}")
         return
 
-    bridge = ZulipMaxBridge(
-        stream_name=config["stream"],
-        max_token=config["max_token"],
+    logging.info("[Main] Инициализация объектов шлюза и бота мессенджера Макс...")
+
+    bridge = ZulipMaksBridge(
+        maks_token=config["maks_token"],
+        maks_api_url=config["maks_api_url"],
+        zulip_site=config["zulip_site"],
         loop=loop,
         zuliprc_path=ZULIPRC_PATH
     )
 
+    bot_poll = MaksBotPoll(
+        maks_token=config["maks_token"],
+        maks_api_url=config["maks_api_url"],
+        zulip_bridge=bridge,
+        stop_event=stop_event
+    )
+
     try:
         async with aiohttp.ClientSession() as session:
-            bridge.session = session # Явно прокидываем сессию в мост (на всякий случай)
-            logging.info("[Main] Запуск параллельных процессов: Клиент Макс (Matrix) и Мост Zulip...")
+            logging.info("[Main] Запуск параллельных процессов: polling Макс-бота и bridge...")
 
-            await asyncio.gather(
-                start_max_bot(config["max_user_id"], config["max_password"]),
-                bridge.start(session)
-            )
-    except asyncio.CancelledError:
-        logging.info("[Main] Получен сигнал отмены. Завершение работы процессов...")
+            await bridge.start(session)
+            await bot_poll.start(session)
+
+            await stop_event.wait()
     except Exception as e:
-        logging.error(f"[Main] Ошибка во время работы параллельных задач: {e}")
-    finally:
-        # Корректно закрываю сессию Matrix-клиента, если она была инициализирована
-        if matrix_client and matrix_client.should_upload_keys: # проверка, что клиент запущен
-            logging.info("[Main] Закрытие сессии Matrix-клиента...")
-            await matrix_client.close()
-        logging.info("[Main] Единый сервис успешно остановлен.")
+        logging.exception(f"[Main] Критическая ошибка в основном цикле: {e}")
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("[Main] Сервис остановлен пользователем.")
-    except Exception as e:
-        logging.exception(f"[Main] Непредвиденное критическое исключение: {e}")
+    asyncio.run(main())

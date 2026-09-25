@@ -1,6 +1,8 @@
 .venv
 .env
 
+bridge.db
+
 zuliprc
 */zuliprc
 testing/
