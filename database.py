@@ -14,15 +14,13 @@ DB_PATH = BASE_DIR / "bridge.db"
 
 
 def _get_connection() -> sqlite3.Connection:
-    """Вспомогательный метод для создания безопасного подключения с таймаутом."""
-    # timeout=10 заставляет процесс подождать до 10 секунд, если БД занята, вместо падения
+    # Таймаут в 10 секунд не даст транзакции упасть, если диск на секунду занят
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
 
-    # режим WAL для многопоточной/асинхронной работы без блокировок
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
     except sqlite3.Error as e:
-        logging.warning(f"[DB] Не удалось включить режим WAL: {e}")
+        logging.warning(f"[DB] Не удалось активировать режим WAL: {e}")
 
     return conn
 
@@ -48,7 +46,7 @@ def init_db() -> None:
 def add_user(zulip_id: str, tg_id: str) -> None:
     z_id = str(zulip_id)
     t_id = str(tg_id)
-    logging.info(f"[DB] Попытка записи привязки: Zulip ID '{z_id}' <-> Max ID '{t_id}'")
+    logging.info(f"[DB] Попытка записи привязки: Zulip ID '{z_id}' <-> TG ID '{t_id}'")
 
     try:
         with _get_connection() as conn:
@@ -67,7 +65,7 @@ def add_user(zulip_id: str, tg_id: str) -> None:
 
 def get_tg_id_by_zulip(zulip_id: str) -> Optional[str]:
     z_id = str(zulip_id)
-    logging.debug(f"[DB] Запрос Max ID для Zulip ID '{z_id}'...")
+    logging.debug(f"[DB] Запрос TG ID для Zulip ID '{z_id}'...")
 
     try:
         with _get_connection() as conn:
@@ -76,9 +74,8 @@ def get_tg_id_by_zulip(zulip_id: str) -> Optional[str]:
             row = cursor.fetchone()
 
             if row:
-                max_id = row[0]
-                logging.debug(f"[DB] Найдено совпадение: Zulip ID '{z_id}' -> Max ID '{max_id}'")
-                return max_id
+                logging.debug(f"[DB] Найдено совпадение: Zulip ID '{z_id}' -> TG ID '{row[0]}'")
+                return row[0]
 
             logging.debug(f"[DB] Совпадений для Zulip ID '{z_id}' не найдено.")
             return None
@@ -89,8 +86,7 @@ def get_tg_id_by_zulip(zulip_id: str) -> Optional[str]:
 
 def get_zulip_id_by_tg(tg_id: str) -> Optional[str]:
     t_id = str(tg_id)
-    logging.debug(f"[DB] Запрос Zulip ID для Max ID '{t_id}'...")
-
+    logging.debug(f"[DB] Запрос Zulip ID для TG ID '{t_id}'...")
     try:
         with _get_connection() as conn:
             cursor = conn.cursor()
@@ -98,21 +94,19 @@ def get_zulip_id_by_tg(tg_id: str) -> Optional[str]:
             row = cursor.fetchone()
 
             if row:
-                zulip_id = row[0]
-                logging.debug(f"[DB] Найдено совпадение: Max ID '{t_id}' -> Zulip ID '{zulip_id}'")
-                return zulip_id
+                logging.debug(f"[DB] Найдено совпадение: TG ID '{t_id}' -> Zulip ID '{row[0]}'")
+                return row[0]
 
-            logging.debug(f"[DB] Совпадений для Max ID '{t_id}' не найдено.")
+            logging.debug(f"[DB] Совпадений для TG ID '{t_id}' не найдено.")
             return None
     except sqlite3.Error as e:
-        logging.error(f"[DB] Ошибка SQL при поиске по Max ID '{t_id}': {e}")
+        logging.error(f"[DB] Ошибка SQL при поиске по TG ID '{t_id}': {e}")
         return None
 
 
 def remove_user_by_tg(tg_id: str) -> bool:
     t_id = str(tg_id)
-    logging.info(f"[DB] Попытка удаления привязок для Max ID '{t_id}'...")
-
+    logging.info(f"[DB] Попытка удаления привязок для TG ID '{t_id}'...")
     try:
         with _get_connection() as conn:
             cursor = conn.cursor()
@@ -121,11 +115,11 @@ def remove_user_by_tg(tg_id: str) -> bool:
             deleted_rows = cursor.rowcount
 
         if deleted_rows > 0:
-            logging.info(f"[DB] Успешно удалено привязок: {deleted_rows} для Max ID '{t_id}'.")
+            logging.info(f"[DB] Успешно удалено привязок: {deleted_rows} для TG ID '{t_id}'.")
             return True
 
-        logging.warning(f"[DB] Записей для удаления по Max ID '{t_id}' не обнаружено.")
+        logging.warning(f"[DB] Записей для удаления по TG ID '{t_id}' не обнаружено.")
         return False
     except sqlite3.Error as e:
-        logging.error(f"[DB] Ошибка SQL при удалении по Max ID '{t_id}': {e}")
+        logging.error(f"[DB] Ошибка SQL при удалении по TG ID '{t_id}': {e}")
         return False
