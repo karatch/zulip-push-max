@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from bridge import ZulipMaksBridge
 from bot import MaksBotPoll
 
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 if getattr(sys, 'frozen', False):
@@ -105,9 +104,11 @@ async def main():
         async with aiohttp.ClientSession() as session:
             logging.info("[Main] Запуск параллельных процессов: polling Макс-бота и bridge...")
 
+            # Прокидываем общую HTTP-сессию в мост и бота
             await bridge.start(session)
             await bot_poll.start(session)
 
+            # Ожидаем флага остановки
             await stop_event.wait()
     except Exception as e:
         logging.exception(f"[Main] Критическая ошибка в основном цикле: {e}")
