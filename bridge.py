@@ -128,9 +128,13 @@ class ZulipMaksBridge:
         logging.info(f"--- [DEBUG START] ---")
         logging.info(f"[Bridge] Перехвачено сообщение из [{stream_name}]")
 
-        encoded_stream = f"{stream_id}-{stream_name.replace(' ', '.')}"
-        encoded_topic = urllib.parse.quote(topic.replace(' ', '.'))
-        msg_url = f"{self.zulip_site}/#narrow/stream/{encoded_stream}/topic/{encoded_topic}/near/{message_id}"
+        # encoded_stream = f"{stream_id}-{stream_name.replace(' ', '.')}"
+        # encoded_topic = urllib.parse.quote(topic.replace(' ', '.'))
+        # msg_url = f"{self.zulip_site}/#narrow/stream/{encoded_stream}/topic/{encoded_topic}/near/{message_id}"
+
+        channel_slug = f"{stream_id}-{stream_name.lower().replace(' ', '-')}"
+        encoded_topic = urllib.parse.quote(topic)
+        msg_url = f"{self.zulip_site}/#narrow/channel/{channel_slug}/topic/{encoded_topic}/with/{message_id}"
 
         subscribers = self.get_stream_subscribers(stream_name, stream_id)
         sent_counter = 0
