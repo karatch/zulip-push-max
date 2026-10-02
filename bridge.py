@@ -26,18 +26,11 @@ class ZulipMaksBridge:
         self.session = None
         self.semaphore = asyncio.Semaphore(25)
 
-    async def send_maks_push(
-            self,
-            maks_user_id: str,
-            stream_name: str,
-            topic: str,
-            sender_name: str,
-            message_content: str,
-            msg_url: str
-    ) -> None:
-        logging.info(f"[Bridge API] Попытка отправки пуша в Макс для пользователя: {maks_user_id}")
 
-        # Макс нативно поддерживает разметку Markdown
+    async def send_maks_push(self, maks_user_id: str, stream_name: str, topic: str, sender_name: str,
+                             message_content: str, msg_url: str) -> None:
+        logging.info(f"[Bridge API] Попытка отправки пуша в MAX для пользователя: {maks_user_id}")
+
         text = (
             f"🔔 **Новое сообщение в Zulip [{stream_name}]**\n"
             f"**Тема:** {topic}\n"
@@ -46,23 +39,30 @@ class ZulipMaksBridge:
             f"[Открыть в чате Zulip]({msg_url})"
         )
 
-        url = f"{self.maks_api_url}/messages/sendText"
+        url = f"{self.maks_api_url}/messages"
+
+        headers = {
+            "Authorization": self.maks_token,
+            "Content-Type": "application/json"
+        }
         payload = {
-            "token": self.maks_token,
-            "chatId": maks_user_id,  # уникальный идентификатор чата/пользователя в Макс
+            "chatId": maks_user_id,
             "text": text
         }
 
         async with self.semaphore:
             try:
-                async with self.session.post(url, data=payload, timeout=3) as response:
-                    if response.status == 200:
-                        logging.info(f"[Bridge API] Пуш успешно доставлен в Макс пользователю {maks_user_id}")
+                # Отправка пуша по новому стандарту 2026 года с флагом ssl=False
+                async with self.session.post(url, json=payload, headers=headers, timeout=3, ssl=False) as response:
+                    if response.status in [200, 201]:
+                        logging.info(f"[Bridge API] Пуш успешно доставлен в MAX пользователю {maks_user_id}")
                     else:
                         res_text = await response.text()
-                        logging.error(f"[Bridge API] Ошибка Макс API (Статус {response.status}) для {maks_user_id}: {res_text}")
+                        logging.error(
+                            f"[Bridge API] Ошибка MAX API (Статус {response.status}) для {maks_user_id}: {res_text}")
             except Exception as e:
-                logging.error(f"[Bridge API] Исключение сети при отправке в Макс для {maks_user_id}: {e}")
+                logging.error(f"[Bridge API] Исключение сети при отправке в MAX для {maks_user_id}: {e}")
+
 
     def get_stream_subscribers(self, stream_name: str, stream_id: int = None) -> list:
         try:
@@ -75,6 +75,7 @@ class ZulipMaksBridge:
         except Exception as e:
             logging.error(f"[Bridge] Исключение при получении подписчиков Zulip: {e}")
             return []
+
 
     def get_user_id_by_email(self, email: str) -> dict:
         try:

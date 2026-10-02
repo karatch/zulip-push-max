@@ -26,12 +26,25 @@ class MaksBotPoll:
         self.fsm_storage = {}
 
     async def send_message(self, chat_id: str, text: str) -> None:
-        url = f"{self.api_url}/messages/sendText"
-        payload = {"token": self.token, "chatId": chat_id, "text": text}
+        # REST-эндпоинт согласно спецификации platform-api2.max.ru
+        url = f"{self.api_url}/messages"
+
+        headers = {
+            "Authorization": self.token,
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "chatId": chat_id,
+            "text": text
+        }
+
         try:
-            await self.session.post(url, data=payload, timeout=3)
+            # Отправляем JSON-запрос с отключенной проверкой SSL корпоративного шлюза
+            await self.session.post(url, json=payload, headers=headers, timeout=3, ssl=False)
         except Exception as e:
-            logging.error(f"[Maks Bot] Ошибка отправки сообщения для {chat_id}: {e}")
+            logging.error(f"[MAX Bot] Ошибка отправки сообщения для {chat_id}: {e}")
+
 
     async def handle_message(self, chat_id: str, text: str, user_name: str) -> None:
         text = text.strip()
@@ -118,13 +131,15 @@ class MaksBotPoll:
 
         if text in ["/start", "старт"]:
             welcome = (
-                f"Привет, {user_name}! 👋\nЯ шлюз-бот для отправки уведомлений из Zulip.\n\n"
+                f"Привет, {user_name}! 👋\n"
+                f"Я шлюз-бот для безопасной отправки push-уведомлений из Zulip.\n\n"
                 f"Доступные команды:\n"
                 f"• /bind — Привязать аккаунт Zulip (по email)\n"
                 f"• /status — Проверить статус привязки\n"
                 f"• /unbind — Отключить уведомления"
             )
             await self.send_message(chat_id, welcome)
+
 
         elif text in ["/bind", "привязать"]:
             self.fsm_storage[chat_id] = {"state": "WAIT_EMAIL", "data": {}}
@@ -147,40 +162,58 @@ class MaksBotPoll:
     async def start(self, session):
         self.session = session
 
+        logging.info("[Maks Bot] Проверка валидности токена и инициализация через GET /me...")
+        try:
+            headers = {"Authorization": self.token}
+
+            # флаг ssl=False для обхода корпоративной подмены сертификатов
+            async with self.session.get(f"{self.api_url}/me", headers=headers, timeout=5, ssl=False) as resp:
+                if resp.status == 200:
+                    bot_info = await resp.json()
+                    logging.info(
+                        f"🎉 [Maks Bot] Успешное подключение! Имя бота в сети MAX: {bot_info.get('name')} (@{bot_info.get('username')})")
+                else:
+                    res_text = await resp.text()
+                    logging.error(f"❌ [Maks Bot] Сервер отклонил токен (Статус {resp.status}): {res_text}")
+                    return
+        except Exception as e:
+            logging.error(f"❌ [Maks Bot] Не удалось связаться с сервером MAX при запросе /me: {e}")
+            return
+
         async def poll_loop():
-            logging.info("[Maks Bot] Фоновый цикл Long Polling для мессенджера Макс успешно запущен.")
+            logging.info("[Maks Bot] Фоновый цикл Long Polling для мессенджера MAX успешно запущен.")
             while not self.stop_event.is_set():
-                # эндпоинт долгого опроса событий Bot API мессенджера Макс
                 url = f"{self.api_url}/events/get"
-                params = {
-                    "token": self.token,
-                    "lastEventId": self.last_event_id,
-                    "pollTime": 20  # ожидание события от сервера в течение 20 секунд
-                }
+                params = {"pollTime": 20}
+                if self.last_event_id > 0:
+                    params["lastEventId"] = self.last_event_id
+
+                headers = {"Authorization": self.token}
+
                 try:
-                    async with self.session.get(url, params=params, timeout=25) as response:
+                    # флаг ssl=False
+                    async with self.session.get(url, params=params, headers=headers, timeout=25, ssl=False) as response:
                         if response.status == 200:
                             data = await response.json()
                             events = data.get("events", [])
+
                             for event in events:
                                 self.last_event_id = event.get("eventId", self.last_event_id)
-
                                 if event.get("type") == "newMessage":
                                     msg_payload = event.get("payload", {})
                                     chat_id = msg_payload.get("chat", {}).get("chatId")
                                     text = msg_payload.get("text", "")
-
                                     from_user = msg_payload.get("from", {})
                                     user_name = from_user.get("firstName", "Коллега")
 
                                     if chat_id and text:
-                                        # отправка сообщения на конвейер обработки
                                         await self.handle_message(chat_id, text, user_name)
                         elif response.status == 401:
                             logging.error("[Maks Bot] Ошибка авторизации токена MAKS_BOT_TOKEN!")
-                            await asyncio.sleep(10)
+                            await asyncio.sleep(15)
                 except Exception as e:
-                    # Мягкое подавление сетевых просадок
                     await asyncio.sleep(2)
 
         asyncio.create_task(poll_loop())
+
+
