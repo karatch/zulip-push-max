@@ -191,14 +191,17 @@ class MaksBotPoll:
                 headers = {"Authorization": self.token}
 
                 try:
-                    # флаг ssl=False
                     async with self.session.get(url, params=params, headers=headers, timeout=25, ssl=False) as response:
                         if response.status == 200:
                             data = await response.json()
                             events = data.get("events", [])
 
+                            logging.info(
+                                f"[Maks Bot Debug] Запрос выполнен успешно. Получено событий: {len(events)} | Сырой JSON: {data}")
+
                             for event in events:
                                 self.last_event_id = event.get("eventId", self.last_event_id)
+
                                 if event.get("type") == "newMessage":
                                     msg_payload = event.get("payload", {})
                                     chat_id = msg_payload.get("chat", {}).get("chatId")
@@ -207,11 +210,13 @@ class MaksBotPoll:
                                     user_name = from_user.get("firstName", "Коллега")
 
                                     if chat_id and text:
+                                        logging.info(f"[Maks Bot] Найдено сообщение: '{text}' от {user_name}")
                                         await self.handle_message(chat_id, text, user_name)
-                        elif response.status == 401:
-                            logging.error("[Maks Bot] Ошибка авторизации токена MAKS_BOT_TOKEN!")
-                            await asyncio.sleep(15)
+                        else:
+                            res_err = await response.text()
+                            logging.warning(f"[Maks Bot Debug] Сервер вернул статус {response.status}: {res_err}")
                 except Exception as e:
+                    logging.debug(f"[Maks Bot] Исключение в Long Polling: {e}")
                     await asyncio.sleep(2)
 
         asyncio.create_task(poll_loop())
