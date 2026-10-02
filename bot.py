@@ -181,23 +181,31 @@ class MaksBotPoll:
             return
 
         async def poll_loop():
-            logging.info("[Maks Bot] Фоновый цикл Long Polling для мессенджера MAX успешно запущен.")
+            logging.info("[Maks Bot] Фоновый цикл Long Polling для мессенджера MAX (через /subscriptions) запущен.")
             while not self.stop_event.is_set():
-                url = f"{self.api_url}/events/get"
-                params = {"pollTime": 20}
-                if self.last_event_id > 0:
-                    params["lastEventId"] = self.last_event_id
+                # Новый эндпоинт согласно спецификации 2026 года
+                url = f"{self.api_url}/subscriptions"
 
-                headers = {"Authorization": self.token}
+                headers = {
+                    "Authorization": self.token,
+                    "Content-Type": "application/json"
+                }
+
+                # По REST-стандарту platform-api2 параметры передаются в теле JSON
+                payload = {
+                    "pollTime": 20
+                }
+                if self.last_event_id > 0:
+                    payload["lastEventId"] = self.last_event_id
 
                 try:
-                    async with self.session.get(url, params=params, headers=headers, timeout=25, ssl=False) as response:
+                    # данные через json=payload
+                    async with self.session.post(url, json=payload, headers=headers, timeout=25, ssl=False) as response:
                         if response.status == 200:
                             data = await response.json()
-                            events = data.get("events", [])
 
-                            logging.info(
-                                f"[Maks Bot Debug] Запрос выполнен успешно. Получено событий: {len(events)} | Сырой JSON: {data}")
+                            logging.info(f"[MAX Debug] Ответ сервера: {data}")
+                            events = data.get("events", [])
 
                             for event in events:
                                 self.last_event_id = event.get("eventId", self.last_event_id)
@@ -210,13 +218,18 @@ class MaksBotPoll:
                                     user_name = from_user.get("firstName", "Коллега")
 
                                     if chat_id and text:
-                                        logging.info(f"[Maks Bot] Найдено сообщение: '{text}' от {user_name}")
+                                        logging.info(f"[Maks Bot] Обработка команды '{text}' от {user_name}")
                                         await self.handle_message(chat_id, text, user_name)
+
+                        elif response.status == 404:
+                            logging.critical("[Maks Bot] Эндпоинт /subscriptions не найден. Проверьте базовый URL.")
+                            await asyncio.sleep(30)
+                        elif response.status == 401:
+                            logging.error("[Maks Bot] Ошибка авторизации токена!")
+                            await asyncio.sleep(15)
                         else:
-                            res_err = await response.text()
-                            logging.warning(f"[Maks Bot Debug] Сервер вернул статус {response.status}: {res_err}")
+                            await asyncio.sleep(5)
                 except Exception as e:
-                    logging.debug(f"[Maks Bot] Исключение в Long Polling: {e}")
                     await asyncio.sleep(2)
 
         asyncio.create_task(poll_loop())
